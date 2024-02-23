@@ -103,6 +103,11 @@ options:
                   - IPv6 address to be set in the address format is <ipv6 address>/<mask>
                     for example, 2001:db8:2201:1::1/64.
                 type: str
+           anycast_addresses:
+            description:
+              - List of IPv6 addresses to be set for anycast.
+            type: list
+            elements: str
           enabled:
             description:
               - enabled flag of the ipv6.

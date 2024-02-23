@@ -274,7 +274,8 @@ class L3_interfaces(ConfigBase):
                 new_obj['ipv4'] = obj['ipv4']
             if obj.get('ipv6', None) and \
                (obj['ipv6'].get('addresses', None) or
-               obj['ipv6'].get('enabled', None) is not None):
+               obj['ipv6'].get('enabled', None) is not None or
+               obj['ipv6'].get('anycast_addresses', None)):
                 new_obj['ipv6'] = obj['ipv6']
 
             if new_obj:
@@ -308,7 +309,7 @@ class L3_interfaces(ConfigBase):
                     new_obj['ipv4'] = obj['ipv4']
 
                 if obj['ipv6'] is None:
-                    new_obj['ipv6'] = {'addresses': None, 'enabled': False}
+                    new_obj['ipv6'] = {'addresses': None, 'enabled': False, 'anycast_addresses': None}
                 else:
                     new_obj['ipv6'] = obj['ipv6']
 
@@ -329,9 +330,11 @@ class L3_interfaces(ConfigBase):
                 if obj.get('ipv6', None):
                     ipv6_addresses = obj['ipv6'].get('addresses', None)
                     ipv6_enable = obj['ipv6'].get('enabled', None)
+                    anycast_addresses = obj['ipv6'].get('anycast_addresses', None)
                 else:
                     ipv6_addresses = None
                     ipv6_enable = None
+                    anycast_addresses = None
 
                 if ipv4_addresses is not None or ipv6_addresses is not None:
                     objects.append(obj.copy())
@@ -359,6 +362,8 @@ class L3_interfaces(ConfigBase):
         ipv4_addr_url = 'data/openconfig-interfaces:interfaces/interface={intf_name}/{sub_intf_name}/openconfig-if-ip:ipv4/addresses/address={address}'
         ipv6_addr_url = 'data/openconfig-interfaces:interfaces/interface={intf_name}/{sub_intf_name}/openconfig-if-ip:ipv6/addresses/address={address}'
         ipv6_enabled_url = 'data/openconfig-interfaces:interfaces/interface={intf_name}/{sub_intf_name}/openconfig-if-ip:ipv6/config/enabled'
+        ipv6_anycast_url = 'data/openconfig-interfaces:interfaces/interface={intf_name}/{sub_intf_name}/openconfig-if-ip:ipv6'
+        ipv6_anycast_url += '/openconfig-interfaces-ext:sag-ipv6/config/static-anycast-gateway={anycast_ip}'
 
         if not want:
             return requests
@@ -373,6 +378,7 @@ class L3_interfaces(ConfigBase):
             have_ipv4_anycast_addrs = list()
             have_ipv6_addrs = list()
             have_ipv6_enabled = None
+            have_ipv6_anycast_addrs = list()
 
             if have_obj.get('ipv4'):
                 if 'addresses' in have_obj['ipv4']:
@@ -383,6 +389,8 @@ class L3_interfaces(ConfigBase):
             have_ipv6_addrs = self.get_address('ipv6', [have_obj])
             if have_obj.get('ipv6') and 'enabled' in have_obj['ipv6']:
                 have_ipv6_enabled = have_obj['ipv6']['enabled']
+            if 'anycast_addresses' in have_obj['ipv6']:
+                    have_ipv6_anycast_addrs = have_obj['ipv6']['anycast_addresses']
 
             ipv4 = l3.get('ipv4', None)
             ipv6 = l3.get('ipv6', None)
@@ -397,7 +405,7 @@ class L3_interfaces(ConfigBase):
                 is_del_ipv6 = True
             elif ipv4 and not ipv4.get('addresses') and not ipv4.get('anycast_addresses'):
                 is_del_ipv4 = True
-            elif ipv6 and not ipv6.get('addresses') and ipv6.get('enabled') is None:
+            elif ipv6 and not ipv6.get('addresses') and ipv6.get('enabled') is None and not ipv6.get('anycast_addresses'):
                 is_del_ipv6 = True
 
             if is_del_ipv4:
@@ -450,14 +458,22 @@ class L3_interfaces(ConfigBase):
                 if have_ipv6_enabled:
                     ipv6_enabled_delete_request = {"path": ipv6_enabled_url.format(intf_name=name, sub_intf_name=sub_intf), "method": DELETE}
                     requests.append(ipv6_enabled_delete_request)
+                if have_ipv6_anycast_addrs and len(have_ipv6_anycast_addrs) != 0:
+                    for ip in have_ipv6_anycast_addrs:
+                        ip = ip.replace('/', '%2f')
+                        anycast_delete_request = {"path": ipv6_anycast_url.format(intf_name=name, sub_intf_name=sub_intf, anycast_ip=ip), "method": DELETE}
+                        requests.append(anycast_delete_request)
             else:
                 ipv6_addrs = []
                 ipv6_enabled = None
+                ipv6_anycast_addrs = []
                 if l3.get('ipv6'):
                     if l3['ipv6'].get('addresses'):
                         ipv6_addrs = l3['ipv6']['addresses']
                     if 'enabled' in l3['ipv6']:
                         ipv6_enabled = l3['ipv6']['enabled']
+                    if l3['ipv6'].get('anycast_addresses'):
+                        ipv6_anycast_addrs = l3['ipv6']['anycast_addresses']
                 if ipv6_addrs:
                     for ip in ipv6_addrs:
                         if have_ipv6_addrs and ip['address'] in have_ipv6_addrs:
@@ -468,6 +484,12 @@ class L3_interfaces(ConfigBase):
                 if have_ipv6_enabled and ipv6_enabled is not None:
                     request = {"path": ipv6_enabled_url.format(intf_name=name, sub_intf_name=sub_intf), "method": DELETE}
                     requests.append(request)
+                if ipv6_anycast_addrs:
+                    for ip in ipv6_anycast_addrs:
+                        if have_ipv6_anycast_addrs and ip in have_ipv6_anycast_addrs:
+                            ip = ip.replace('/', '%2f')
+                            anycast_delete_request = {"path": ipv4_anycast_url.format(intf_name=name, sub_intf_name=sub_intf, anycast_ip=ip), "method": DELETE}
+                            requests.append(anycast_delete_request)
         return requests
 
     def get_delete_all_completely_requests(self, configs):
@@ -485,6 +507,8 @@ class L3_interfaces(ConfigBase):
         ipv4_anycast_url += '/openconfig-interfaces-ext:sag-ipv4/config/static-anycast-gateway={anycast_ip}'
         ipv6_addrs_url_all = 'data/openconfig-interfaces:interfaces/interface={intf_name}/{sub_intf_name}/openconfig-if-ip:ipv6/addresses'
         ipv6_enabled_url = 'data/openconfig-interfaces:interfaces/interface={intf_name}/{sub_intf_name}/openconfig-if-ip:ipv6/config/enabled'
+        ipv6_anycast_url = 'data/openconfig-interfaces:interfaces/interface={intf_name}/{sub_intf_name}/openconfig-if-ip:ipv6'
+        ipv6_anycast_url += '/openconfig-interfaces-ext:sag-ipv6/config/static-anycast-gateway={anycast_ip}'
         for l3 in configs:
             name = l3.get('name')
             ipv4_addrs = []
@@ -504,6 +528,8 @@ class L3_interfaces(ConfigBase):
                     ipv6_addrs = l3['ipv6']['addresses']
                 if 'enabled' in l3['ipv6']:
                     ipv6_enabled = l3['ipv6']['enabled']
+                if l3['ipv6'].get('anycast_addresses', None):
+                    ipv6_anycast = l3['ipv6']['anycast_addresses']
 
             sub_intf = self.get_sub_interface_name(name)
 
@@ -521,6 +547,11 @@ class L3_interfaces(ConfigBase):
             if ipv6_enabled:
                 ipv6_enabled_delete_request = {"path": ipv6_enabled_url.format(intf_name=name, sub_intf_name=sub_intf), "method": DELETE}
                 requests.append(ipv6_enabled_delete_request)
+            if ipv6_anycast:
+                for ip in ipv6_anycast:
+                    ip = ip.replace('/', '%2f')
+                    anycast_delete_request = {"path": ipv6_anycast_url.format(intf_name=name, sub_intf_name=sub_intf, anycast_ip=ip), "method": DELETE}
+                    requests.append(anycast_delete_request)
         return requests
 
     def get_create_l3_interfaces_requests(self, configs, have, want):
@@ -533,6 +564,8 @@ class L3_interfaces(ConfigBase):
         ipv4_anycast_url += 'openconfig-interfaces-ext:sag-ipv4/config/static-anycast-gateway'
         ipv6_addrs_url = 'data/openconfig-interfaces:interfaces/interface={intf_name}/{sub_intf_name}/openconfig-if-ip:ipv6/addresses'
         ipv6_enabled_url = 'data/openconfig-interfaces:interfaces/interface={intf_name}/{sub_intf_name}/openconfig-if-ip:ipv6/config'
+        ipv6_anycast_url = 'data/openconfig-interfaces:interfaces/interface={intf_name}/{sub_intf_name}/openconfig-if-ip:ipv6/'
+        ipv6_anycast_url += 'openconfig-interfaces-ext:sag-ipv6/config/static-anycast-gateway'
 
         for l3 in configs:
             l3_interface_name = l3.get('name')
@@ -556,6 +589,8 @@ class L3_interfaces(ConfigBase):
                     ipv6_addrs = l3['ipv6']['addresses']
                 if 'enabled' in l3['ipv6']:
                     ipv6_enabled = l3['ipv6']['enabled']
+                if l3['ipv6'].get('anycast_addresses'):
+                    ipv6_anycast = l3['ipv6']['anycast_addresses']
 
             if ipv4_addrs:
                 ipv4_addrs_pri_payload = []
@@ -599,6 +634,11 @@ class L3_interfaces(ConfigBase):
                 payload = self.build_update_ipv6_enabled(ipv6_enabled)
                 ipv6_enabled_req = {"path": ipv6_enabled_url.format(intf_name=l3_interface_name, sub_intf_name=sub_intf), "method": PATCH, "data": payload}
                 requests.append(ipv6_enabled_req)
+            
+            if ipv6_anycast:
+                anycast_payload = {'openconfig-interfaces-ext:static-anycast-gateway': ipv6_anycast}
+                anycast_url = ipv6_anycast_url.format(intf_name=l3_interface_name, sub_intf_name=sub_intf)
+                requests.append({'path': anycast_url, 'method': PATCH, 'data': anycast_payload})
 
         return requests
 
@@ -651,3 +691,5 @@ class L3_interfaces(ConfigBase):
                     cfg['ipv4']['anycast_addresses'].sort()
                 if cfg.get('ipv6', None) and cfg['ipv6'].get('addresses', None):
                     cfg['ipv6']['addresses'].sort(key=lambda x: x['address'])
+                if cfg.get('ipv6', None) and cfg['ipv6'].get('anycast_addresses', None):
+                    cfg['ipv6']['anycast_addresses'].sort()
